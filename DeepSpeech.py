@@ -1693,6 +1693,8 @@ def export():
 
         inputs, outputs = create_inference_graph()
 
+        tf.train.export_meta_graph(filename='inference-model.meta')
+
         # TODO: Transform the decoded output to a string
 
         # Create a saver and exporter using variables from the above newly created graph
