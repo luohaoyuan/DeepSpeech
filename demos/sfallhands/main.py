@@ -6,6 +6,7 @@ import csv
 import os
 import sys
 import textwrap
+import time
 
 from threading import Thread
 from queue import Queue
@@ -19,6 +20,8 @@ import tensorflow as tf
 from util.audio import audiofile_to_input_vector
 from util.text import ndarray_to_text
 from util.spell import correction
+
+import scipy.io.wavfile as wav
 
 n_input = 26
 n_context = 9
@@ -78,6 +81,11 @@ class Sample(QObject):
     def button(self):
         return self._button
 
+
+def wav_length(wav_path):
+    freq, samples = wav.read(wav_path)
+    return len(samples)/freq
+
 class InferenceRunner(QObject):
     inference_done = pyqtSignal(Sample, str)
 
@@ -102,7 +110,11 @@ class InferenceRunner(QObject):
                 sample, use_LM = args
                 vec = audiofile_to_input_vector(sample.wav_path, n_input, n_context)
                 output_tensor = sess.graph.get_tensor_by_name('output_node:0')
+                start = time.time()
                 result = sess.run([output_tensor], feed_dict={'input_node:0': [vec], 'input_lengths:0': [len(vec)]})
+                inference_time = time.time() - start
+                wav_time = wav_length(sample.wav_path)
+                print('wav length: {}\ninference time: {}\nRTF: {:2f}'.format(wav_time, inference_time, inference_time/wav_time))
                 text = ndarray_to_text(result[0][0][0])
                 if use_LM:
                     text = correction(text)
@@ -196,11 +208,11 @@ class MainWidget(QMainWindow):
 
         corporaButtons[0].setChecked(True)
 
-        modelSelectionLabel = QLabel('<p style="font-size:20px; font-style: bold; vertical-align: css bottom;">Use a model trained on the following dataset:</p>')
+        modelSelectionLabel = QLabel('<span style="font-size:20px; font-style: bold;">Use a model trained on the following dataset:</span>')
         modelSelectionLabel.setStyleSheet('max-height: 30px; height: 30px;')
         modelSelectionLabel.setAlignment(Qt.AlignCenter)
 
-        self._useLMButton = QCheckBox("Use Language Model")
+        self._useLMButton = QCheckBox('Use Language Model')
         self._useLMButton.setChecked(False)
 
         modelSelectionHbox = QHBoxLayout()
@@ -210,7 +222,7 @@ class MainWidget(QMainWindow):
         modelSelectionHbox.addStretch(1)
         modelSelectionHbox.addWidget(self._useLMButton)
 
-        sampleSelectionLabel = QLabel('<p style="font-size:20px; font-style: bold; vertical-align: css bottom;">Click a sample below to hear it and see the transcription from the model:</p>')
+        sampleSelectionLabel = QLabel('<span style="font-size:20px; font-style: bold;">Click a sample below to hear it and see the transcription from the model:</span>')
         sampleSelectionLabel.setStyleSheet('max-height: 30px; height: 30px;')
         sampleSelectionLabel.setAlignment(Qt.AlignCenter)
 
@@ -218,10 +230,14 @@ class MainWidget(QMainWindow):
 
         positions = [(j, i) for i in range(3) for j in range(5)]
         for i in range(0, min(15, len(self._samples))):
-            btn = QPushButton(textwrap.fill(self._samples[i].transcription, 70))
+            transcription = self._samples[i].transcription
+            if len(transcription) > 336:
+                transcription = transcription[:336]
+                transcription += '...'
+            btn = QPushButton(textwrap.fill(transcription, 70))
             self._samples[i].set_button(btn)
             btn.clicked.connect((lambda s: lambda: self._sample_clicked(s))(self._samples[i]))
-            btn.setStyleSheet('min-height: 100px; min-width: 300px; border: 2px solid ' + self._samples[i].color)
+            btn.setStyleSheet('min-height: 100px; min-width: 300px; border: 2px solid ' + self._samples[i].color + ';')
             sampleSelectionGrid.addWidget(btn, *positions[i])
 
         self._progressBar = QProgressBar(self)
@@ -278,11 +294,10 @@ class MainWidget(QMainWindow):
     def _on_inference_done(self, sample, transcription):
         self._tasksInProgress -= 1
         self._progressBar.setVisible(self._tasksInProgress != 0)
-        self._transcriptionResult.setHtml('<p style="font-size: 20px; text-align: center;">' + transcription + '</p>')
+        self._transcriptionResult.setHtml('<p style="font-size: 20px; text-align: center;">Transcription: ' + transcription + '</p>')
 
     def _on_playing_changed(self, sample):
         sample.button.setIcon(QIcon())
-
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
