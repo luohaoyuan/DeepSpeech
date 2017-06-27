@@ -119,7 +119,10 @@ class InferenceRunner(QObject):
                 print('wav length: {}\ninference time: {}\nRTF: {:2f}'.format(wav_time, inference_time, inference_time/wav_time))
                 text = ndarray_to_text(result[0][0][0])
                 if use_LM:
+                    start = time.time()
                     text = correction(text)
+                    lm_time = time.time() - start
+                    print('LM time: {}'.format(lm_time))
                 self.inference_done.emit(sample, text)
             elif cmd == 'stop':
                 break
