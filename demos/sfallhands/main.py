@@ -7,6 +7,7 @@ import os
 import sys
 import textwrap
 import time
+import tempfile
 
 from threading import Thread
 from queue import Queue
@@ -22,13 +23,14 @@ from util.text import ndarray_to_text
 from util.spell import correction
 
 import scipy.io.wavfile as wav
+import numpy as np
 
 n_input = 26
 n_context = 9
 
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
-from PyQt5.QtMultimedia import QSoundEffect
+from PyQt5.QtMultimedia import *
 from PyQt5.QtWidgets import *
 
 class Corpus(object):
@@ -167,6 +169,22 @@ class MainWidget(QMainWindow):
         super().__init__()
 
         self._tasksInProgress = 0
+        self._recording = False
+
+        audioFormat = QAudioFormat()
+        audioFormat.setCodec("audio/pcm")
+        audioFormat.setSampleRate(16000)
+        audioFormat.setSampleSize(16)
+        audioFormat.setChannelCount(1)
+        audioFormat.setByteOrder(QAudioFormat.LittleEndian)
+        audioFormat.setSampleType(QAudioFormat.SignedInt)
+
+        inputDeviceInfo = QAudioDeviceInfo.defaultInputDevice()
+        if not inputDeviceInfo.isFormatSupported(audioFormat):
+            print("Can't record audio in 16kHz 16-bit signed PCM format.")
+            self._audioInput = None
+        else:
+            self._audioInput = QAudioInput(audioFormat)
 
         self._corpora = []
         with open(os.path.join('demos', 'sfallhands', 'corpora.csv'), 'r') as csvfile:
@@ -226,6 +244,18 @@ class MainWidget(QMainWindow):
         sampleSelectionLabel.setStyleSheet('max-height: 30px; height: 30px;')
         sampleSelectionLabel.setAlignment(Qt.AlignCenter)
 
+        if self._audioInput is not None:
+            self._micButton = QPushButton(QIcon('demos/sfallhands/microphone.png'), '')
+            self._micButton.setCheckable(True)
+            self._micButton.clicked.connect(self._on_mic_clicked)
+
+        sampleSelectionAndMicInputHbox = QHBoxLayout()
+        sampleSelectionAndMicInputHbox.addStretch(1)
+        sampleSelectionAndMicInputHbox.addWidget(sampleSelectionLabel)
+        sampleSelectionAndMicInputHbox.addStretch(1)
+        if self._audioInput is not None:
+            sampleSelectionAndMicInputHbox.addWidget(self._micButton)
+
         sampleSelectionGrid = QGridLayout()
 
         positions = [(j, i) for i in range(3) for j in range(5)]
@@ -256,7 +286,7 @@ class MainWidget(QMainWindow):
         topWidgetLayout = QVBoxLayout()
         topWidgetLayout.addWidget(modelSelectionLabel)
         topWidgetLayout.addLayout(modelSelectionHbox, 3)
-        topWidgetLayout.addWidget(sampleSelectionLabel)
+        topWidgetLayout.addLayout(sampleSelectionAndMicInputHbox)
         topWidget.setLayout(topWidgetLayout)
         topWidget.setFixedHeight(150)
 
@@ -278,6 +308,44 @@ class MainWidget(QMainWindow):
         self.setCentralWidget(centralWidget)
 
         self.show()
+
+    def _on_mic_clicked(self):
+        if not self._recording:
+            self._recording = True
+            self._recordingDuration = 0
+            self._recordingTimer = QTimer()
+            self._recordingTimer.setTimerType(Qt.PreciseTimer)
+            self._recordingTimer.timeout.connect(self._timer_timeout)
+            self._recordingBuffer = QByteArray()
+            self._inputIODevice = self._audioInput.start()
+            self._inputIODevice.readyRead.connect(self._input_bytes_available)
+            self._recordingTimer.start(100)
+        else:
+            self._recording = False
+            self._recordingTimer.stop()
+            self._micButton.setText('')
+            self._audioInput.stop()
+            f = tempfile.NamedTemporaryFile(delete=False)
+            wav.write(f.name, 16000, np.frombuffer(self._recordingBuffer.data(), np.int16))
+            self._sample_recorded(f.name)
+
+    def _input_bytes_available(self):
+        self._recordingBuffer.append(self._inputIODevice.readAll())
+
+    def _timer_timeout(self):
+        self._recordingDuration += 100
+        self._micButton.setText("{:.1f}".format(self._recordingDuration/1000))
+
+    def _sample_recorded(self, wav_path):
+        self._progressBar.setVisible(True)
+        self._tasksInProgress += 1
+        self._soundEffect = QSoundEffect()
+        self._soundEffect.setSource(QUrl.fromLocalFile(wav_path))
+        self._soundEffect.setLoopCount(0)
+        self._soundEffect.setVolume(1.0)
+        self._soundEffect.play()
+        sample = Sample(wav_path, None, None, None, None)
+        self._inferenceRunner.inference(sample, self._useLMButton.isChecked())
 
     def _sample_clicked(self, sample):
         self._progressBar.setVisible(True)
