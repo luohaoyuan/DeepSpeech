@@ -154,6 +154,8 @@ class MainWidget(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        self._tasksInProgress = 0
+
         self._corpora = []
         with open(os.path.join('demos', 'sfallhands', 'corpora.csv'), 'r') as csvfile:
             corpusReader = csv.reader(csvfile)
@@ -263,6 +265,7 @@ class MainWidget(QMainWindow):
 
     def _sample_clicked(self, sample):
         self._progressBar.setVisible(True)
+        self._tasksInProgress += 1
         self._soundEffect = QSoundEffect()
         self._soundEffect.setSource(QUrl.fromLocalFile(sample.wav_path))
         self._soundEffect.setLoopCount(0)
@@ -273,7 +276,8 @@ class MainWidget(QMainWindow):
         self._inferenceRunner.inference(sample, self._useLMButton.isChecked())
 
     def _on_inference_done(self, sample, transcription):
-        self._progressBar.setVisible(False)
+        self._tasksInProgress -= 1
+        self._progressBar.setVisible(self._tasksInProgress != 0)
         self._transcriptionResult.setHtml('<p style="font-size: 20px; text-align: center;">' + transcription + '</p>')
 
     def _on_playing_changed(self, sample):
