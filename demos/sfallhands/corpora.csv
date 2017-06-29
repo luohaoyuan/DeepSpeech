@@ -2,3 +2,4 @@ name,checkpoint_path
 <p><font color="#00F">LibriSpeech</font> (960 hours)</p>,demos/sfallhands/librispeech_model.ckpt-43935
 <p><font color="#00F">LibriSpeech</font>+<font color="#F00">TED</font> (1160 hours)</p>,demos/sfallhands/librispeech_ted_model.ckpt-54572
 <p><font color="#22AA22">Fisher</font> (2000 hours)</p>,demos/sfallhands/fisher_model.ckpt-72320
+<p><font color="#00F">LibriSpeech</font>+<font color="#F00">TED</font>+<font color="#22AA22">Fisher</font> (3160 hours)</p>,demos/sfallhands/librispeech_ted_fisher_model.ckpt-83500
