@@ -19,8 +19,7 @@ sys.path.insert(1, os.path.join(sys.path[0], '..', '..'))
 import tensorflow as tf
 
 from util.audio import audiofile_to_input_vector
-from util.text import ndarray_to_text
-from util.spell import correction
+from util.text import ndarray_to_text, Alphabet
 
 import scipy.io.wavfile as wav
 import numpy as np
@@ -32,6 +31,32 @@ from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 from PyQt5.QtMultimedia import *
 from PyQt5.QtWidgets import *
+
+custom_op_module = tf.load_op_library('/Users/remorais/Development/tensorflow/bazel-bin/native_client/libctc_decoder_with_kenlm.so')
+
+BEAM_WIDTH = 512
+LM_BINARY_PATH = 'data/lm/lm.binary'
+LM_TRIE_PATH = 'data/lm/trie'
+ALPHABET_CONFIG_PATH = 'data/alphabet.txt'
+LM_WEIGHT = 2.15
+WORD_COUNT_WEIGHT = -0.10
+VALID_WORD_COUNT_WEIGHT = 1.10
+
+alphabet = Alphabet(ALPHABET_CONFIG_PATH)
+
+def decode_with_lm(inputs, sequence_length, beam_width=BEAM_WIDTH,
+                   top_paths=1, merge_repeated=True):
+  decoded_ixs, decoded_vals, decoded_shapes, log_probabilities = (
+      custom_op_module.ctc_beam_search_decoder_with_lm(
+          inputs, sequence_length, beam_width=beam_width,
+          model_path=LM_BINARY_PATH, trie_path=LM_TRIE_PATH, alphabet_path=ALPHABET_CONFIG_PATH,
+          lm_weight=LM_WEIGHT, word_count_weight=WORD_COUNT_WEIGHT, valid_word_count_weight=VALID_WORD_COUNT_WEIGHT,
+          top_paths=top_paths, merge_repeated=merge_repeated))
+
+  return (
+      [tf.SparseTensor(ix, val, shape) for (ix, val, shape)
+       in zip(decoded_ixs, decoded_vals, decoded_shapes)],
+      log_probabilities)
 
 class Corpus(object):
     def __init__(self, name, checkpoint_path):
@@ -102,7 +127,13 @@ class InferenceRunner(QObject):
     def _worker_thread(self):
         sess = tf.Session()
         saver = tf.train.import_meta_graph(os.path.join('demos', 'sfallhands', 'inference-model.meta'))
+        print("restoring from {}".format(self._checkpoint_path))
         saver.restore(sess, self._checkpoint_path)
+
+        logits = sess.graph.get_tensor_by_name('Reshape_3:0')
+        seq_lens = sess.graph.get_tensor_by_name('input_lengths:0')
+        lm_decoded, _ = decode_with_lm(logits, seq_lens, merge_repeated=False, beam_width=1024)
+        lm_decoded = tf.convert_to_tensor([tf.sparse_tensor_to_dense(sparse_tensor) for sparse_tensor in lm_decoded])
 
         while True:
             cmd, *args = self._queue.get()
@@ -111,19 +142,13 @@ class InferenceRunner(QObject):
             elif cmd == 'sample':
                 sample, use_LM = args
                 vec = audiofile_to_input_vector(sample.wav_path, n_input, n_context)
-                output_tensor = sess.graph.get_tensor_by_name('output_node:0')
                 start = time.time()
-                result = sess.run([output_tensor], feed_dict={'input_node:0': [vec], 'input_lengths:0': [len(vec)]})
+                lm_result = sess.run([lm_decoded], feed_dict={'input_node:0': [vec], 'input_lengths:0': [len(vec)]})
                 inference_time = time.time() - start
                 wav_time = wav_length(sample.wav_path)
                 print('wav length: {}\ninference time: {}\nRTF: {:2f}'.format(wav_time, inference_time, inference_time/wav_time))
-                text = ndarray_to_text(result[0][0][0])
-                if use_LM:
-                    start = time.time()
-                    text = correction(text)
-                    lm_time = time.time() - start
-                    print('LM time: {}'.format(lm_time))
-                self.inference_done.emit(sample, text)
+                lm_text = ndarray_to_text(lm_result[0][0][0], alphabet)
+                self.inference_done.emit(sample, lm_text)
             elif cmd == 'stop':
                 break
 
