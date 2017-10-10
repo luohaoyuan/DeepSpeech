@@ -130,6 +130,7 @@ class InferenceRunner(QObject):
         print("restoring from {}".format(self._checkpoint_path))
         saver.restore(sess, self._checkpoint_path)
 
+        old_output = sess.graph.get_tensor_by_name('output_node:0')
         logits = sess.graph.get_tensor_by_name('Reshape_3:0')
         seq_lens = sess.graph.get_tensor_by_name('input_lengths:0')
         lm_decoded, _ = decode_with_lm(logits, seq_lens, merge_repeated=False, beam_width=1024)
@@ -143,11 +144,14 @@ class InferenceRunner(QObject):
                 sample, use_LM = args
                 vec = audiofile_to_input_vector(sample.wav_path, n_input, n_context)
                 start = time.time()
-                lm_result = sess.run([lm_decoded], feed_dict={'input_node:0': [vec], 'input_lengths:0': [len(vec)]})
+                if use_LM:
+                    result = sess.run([lm_decoded], feed_dict={'input_node:0': [vec], 'input_lengths:0': [len(vec)]})
+                else:
+                    result = sess.run([old_output], feed_dict={'input_node:0': [vec], 'input_lengths:0': [len(vec)]})
                 inference_time = time.time() - start
                 wav_time = wav_length(sample.wav_path)
                 print('wav length: {}\ninference time: {}\nRTF: {:2f}'.format(wav_time, inference_time, inference_time/wav_time))
-                lm_text = ndarray_to_text(lm_result[0][0][0], alphabet)
+                lm_text = ndarray_to_text(result[0][0][0], alphabet)
                 self.inference_done.emit(sample, lm_text)
             elif cmd == 'stop':
                 break
