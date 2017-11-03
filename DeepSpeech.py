@@ -164,7 +164,7 @@ FLAGS = tf.app.flags.FLAGS
 set_log_levels(FLAGS.log_level)
 
 # create local logger w/o module name
-log = Logger('main', None)
+log = Logger(id='main')
 
 def initialize_globals():
     # nodes required for cluster setup
@@ -456,6 +456,7 @@ def calculate_mean_edit_distance_and_loss(model_feeder, worker_index, tower_inde
     mean_edit_distance = tf.reduce_mean(distance)
     # Finally we return the
     # - worker and tower indices
+    # - batch size
     # - calculated total and
     # - average losses,
     # - the Levenshtein distance,

@@ -10,12 +10,12 @@ from util.audio import audiofile_to_input_vector
 from util.text import ctc_label_dense_to_sparse, text_to_char_array
 from util.log import Logger
 
-log = Logger('feeding', 'Feeding')
+log = Logger(id='feeding', caption='Feeding')
 
 class DataSet(object):
     '''
     Represents a collection of audio samples and their respective transcriptions.
-    Takes a set of CSV files produced by importers in /bin.
+    Takes a set of CSV files produced by importers in "bin/".
     '''
     def __init__(self, csvs, batch_size=0, skip=0, limit=0, ascending=True):
         '''
