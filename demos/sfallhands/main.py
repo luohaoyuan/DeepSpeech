@@ -44,6 +44,10 @@ VALID_WORD_COUNT_WEIGHT = 1.50
 
 alphabet = Alphabet(ALPHABET_CONFIG_PATH)
 
+model_file = sys.argv[1]
+if not os.path.exists(model_file):
+    print('Invalid model file {}'.format(model_file))
+
 def decode_with_lm(inputs, sequence_length, beam_width=BEAM_WIDTH,
                    top_paths=1, merge_repeated=True):
   decoded_ixs, decoded_vals, decoded_shapes, log_probabilities = (
@@ -126,28 +130,29 @@ class InferenceRunner(QObject):
 
     def _worker_thread(self):
         sess = tf.Session()
-        saver = tf.train.import_meta_graph(os.path.join('demos', 'sfallhands', 'inference-model.meta'))
-        print("restoring from {}".format(self._checkpoint_path))
-        saver.restore(sess, self._checkpoint_path)
+        with tf.gfile.FastGFile(model_file, 'rb') as fin:
+            graph_def = tf.GraphDef()
+            graph_def.ParseFromString(fin.read())
 
-        old_output = sess.graph.get_tensor_by_name('output_node:0')
-        logits = sess.graph.get_tensor_by_name('Reshape_3:0')
-        seq_lens = sess.graph.get_tensor_by_name('input_lengths:0')
+        print('restoring from {}'.format(model_file))
+        [logits, greedy_decoded] = tf.import_graph_def(graph_def, return_elements=['logits:0', 'output_node:0'])
+
+        seq_lens = sess.graph.get_tensor_by_name('import/input_lengths:0')
         lm_decoded, _ = decode_with_lm(logits, seq_lens, merge_repeated=False, beam_width=1024)
         lm_decoded = tf.convert_to_tensor([tf.sparse_tensor_to_dense(sparse_tensor) for sparse_tensor in lm_decoded])
 
         while True:
             cmd, *args = self._queue.get()
             if cmd == 'checkpoint':
-                saver.restore(sess, *args)
+                print('unimplemented')
             elif cmd == 'sample':
                 sample, use_LM = args
                 vec = audiofile_to_input_vector(sample.wav_path, n_input, n_context)
                 start = time.time()
                 if use_LM:
-                    result = sess.run([lm_decoded], feed_dict={'input_node:0': [vec], 'input_lengths:0': [len(vec)]})
+                    result = sess.run([lm_decoded], feed_dict={'import/input_node:0': [vec], seq_lens: [len(vec)]})
                 else:
-                    result = sess.run([old_output], feed_dict={'input_node:0': [vec], 'input_lengths:0': [len(vec)]})
+                    result = sess.run([greedy_decoded], feed_dict={'import/input_node:0': [vec], seq_lens: [len(vec)]})
                 inference_time = time.time() - start
                 wav_time = wav_length(sample.wav_path)
                 print('wav length: {}\ninference time: {}\nRTF: {:2f}'.format(wav_time, inference_time, inference_time/wav_time))
@@ -204,7 +209,7 @@ class MainWidget(QMainWindow):
         self._recording = False
 
         audioFormat = QAudioFormat()
-        audioFormat.setCodec("audio/pcm")
+        audioFormat.setCodec('audio/pcm')
         audioFormat.setSampleRate(16000)
         audioFormat.setSampleSize(16)
         audioFormat.setChannelCount(1)
@@ -213,7 +218,7 @@ class MainWidget(QMainWindow):
 
         inputDeviceInfo = QAudioDeviceInfo.defaultInputDevice()
         if not inputDeviceInfo.isFormatSupported(audioFormat):
-            print("Can't record audio in 16kHz 16-bit signed PCM format.")
+            print('Can\'t record audio in 16kHz 16-bit signed PCM format.')
             self._audioInput = None
         else:
             self._audioInput = QAudioInput(audioFormat)
@@ -249,27 +254,27 @@ class MainWidget(QMainWindow):
         appMenu = menubar.addMenu('File')
         appMenu.addAction(quitAction)
 
-        corporaButtons = []
-        for corpus in self._corpora:
-            btn = RichTextRadioButton(corpus.name)
-            btn.clicked.connect((lambda c: lambda: self._inferenceRunner.load_checkpoint(c.checkpoint_path))(corpus))
-            btn.setStyleSheet('border: 30px; font-size: 20px;')
-            corporaButtons.append(btn)
+        # corporaButtons = []
+        # for corpus in self._corpora:
+        #     btn = RichTextRadioButton(corpus.name)
+        #     btn.clicked.connect((lambda c: lambda: self._inferenceRunner.load_checkpoint(c.checkpoint_path))(corpus))
+        #     btn.setStyleSheet('border: 30px; font-size: 20px;')
+        #     corporaButtons.append(btn)
 
-        corporaButtons[0].setChecked(True)
+        # corporaButtons[0].setChecked(True)
 
-        modelSelectionLabel = QLabel('<span style="font-size:20px; font-style: bold;">Use a model trained on the following dataset:</span>')
-        modelSelectionLabel.setStyleSheet('max-height: 30px; height: 30px;')
-        modelSelectionLabel.setAlignment(Qt.AlignCenter)
+        # modelSelectionLabel = QLabel('<span style="font-size:20px; font-style: bold;">Use a model trained on the following dataset:</span>')
+        # modelSelectionLabel.setStyleSheet('max-height: 30px; height: 30px;')
+        # modelSelectionLabel.setAlignment(Qt.AlignCenter)
 
         self._useLMButton = QCheckBox('Use Language Model')
         self._useLMButton.setChecked(False)
 
         modelSelectionHbox = QHBoxLayout()
         modelSelectionHbox.addStretch(1)
-        for button in corporaButtons:
-            modelSelectionHbox.addWidget(button)
-        modelSelectionHbox.addStretch(1)
+        # for button in corporaButtons:
+        #     modelSelectionHbox.addWidget(button)
+        # modelSelectionHbox.addStretch(1)
         modelSelectionHbox.addWidget(self._useLMButton)
 
         sampleSelectionLabel = QLabel('<span style="font-size:20px; font-style: bold;">Click a sample below to hear it and see the transcription from the model:</span>')
@@ -316,7 +321,7 @@ class MainWidget(QMainWindow):
 
         topWidget = QWidget(centralWidget)
         topWidgetLayout = QVBoxLayout()
-        topWidgetLayout.addWidget(modelSelectionLabel)
+        # topWidgetLayout.addWidget(modelSelectionLabel)
         topWidgetLayout.addLayout(modelSelectionHbox, 3)
         topWidgetLayout.addLayout(sampleSelectionAndMicInputHbox)
         topWidget.setLayout(topWidgetLayout)
@@ -366,7 +371,7 @@ class MainWidget(QMainWindow):
 
     def _timer_timeout(self):
         self._recordingDuration += 100
-        self._micButton.setText("{:.1f}".format(self._recordingDuration/1000))
+        self._micButton.setText('{:.1f}'.format(self._recordingDuration/1000))
 
     def _sample_recorded(self, wav_path):
         self._progressBar.setVisible(True)
