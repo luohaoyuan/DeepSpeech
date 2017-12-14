@@ -216,15 +216,18 @@ class ClusterMessagingClient(object):
             # local call - no queueing needed
             log.step('Local call of function: %s, arguments: %r' % (function, args))
             return self._call(function, args)
-        # Create an Event object to wait/block until response arrives.
+        # create an Event object to wait/block until response arrives.
         event = Event()
-        # Using async variant with Event object as callback (see '_receive').
-        response_id = self.call_async(job, task, function, event, *args)
-        # Waiting for '_receive' function to 'set()' it.
+
+        # create a callback that will unblock the event when the results are ready.
+        result = None
+        def event_callback(items):
+            result = items
+            event.set()
+
+        # do an async call and wait for the callback to unblock us.
+        response_id = self.call_async(job, task, function, event_callback, *args)
         event.wait()
-        # Contract: getting return value from response registry
-        result = self._waiting_for_response[response_id]
-        # Contract: removing the entry (independent of other responses and atomar -> thread safe)
-        del self._waiting_for_response[response_id]
+
         # passing back result of the blocking call
         return result

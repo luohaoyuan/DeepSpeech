@@ -1,6 +1,8 @@
 from __future__ import print_function
-import __builtin__
+
 import sys
+from six import text_type
+from six.moves import builtins
 
 # used for looking up level from step=0 to error=4
 LEVEL_NAMES = [
@@ -32,8 +34,8 @@ def set_log_levels(log_level_str):
             if len(module_level) == 2 and module_level[1] in LEVEL_NAMES:
                 MODULE_LOG_LEVELS[module_level[0]] = LEVEL_NAMES.index(module_level[1])
     # persist settings in cross module global scope - other log-module imports will see those values
-    __builtin__.DEFAULT_LOG_LEVEL = DEFAULT_LOG_LEVEL
-    __builtin__.MODULE_LOG_LEVELS = MODULE_LOG_LEVELS
+    builtins.DEFAULT_LOG_LEVEL = DEFAULT_LOG_LEVEL
+    builtins.MODULE_LOG_LEVELS = MODULE_LOG_LEVELS
 
 class Logger(object):
     '''
@@ -70,28 +72,28 @@ class Logger(object):
         '''
         Prints a single step debug message for detailed debugging.
         '''
-        self._print_message(0, 'S', str(message))
+        self._print_message(0, 'S', text_type(message))
 
     def debug(self, message):
         '''
         Prints a debug message.
         '''
-        self._print_message(1, 'D', str(message))
+        self._print_message(1, 'D', text_type(message))
 
     def info(self, message):
         '''
         Prints an info message. Typically used for presenting results.
         '''
-        self._print_message(2, 'I', str(message))
+        self._print_message(2, 'I', text_type(message))
 
     def warn(self, message):
         '''
         Prints a warning. Typically used in case of resumable errors.
         '''
-        self._print_message(3, 'W', str(message))
+        self._print_message(3, 'W', text_type(message))
 
     def error(self, message):
         '''
         Prints an error message to stderr.
         '''
-        self._print_message(4, 'E', str(message), is_error=True)
+        self._print_message(4, 'E', text_type(message), is_error=True)
