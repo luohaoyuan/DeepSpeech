@@ -32,7 +32,7 @@ from PyQt5.QtGui import *
 from PyQt5.QtMultimedia import *
 from PyQt5.QtWidgets import *
 
-custom_op_module = tf.load_op_library('../tensorflow/bazel-bin/native_client/libctc_decoder_with_kenlm.so')
+custom_op_module = tf.load_op_library('native_client/libctc_decoder_with_kenlm.so')
 
 BEAM_WIDTH = 512
 LM_BINARY_PATH = 'data/lm/lm.binary'
