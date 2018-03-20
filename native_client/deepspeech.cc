@@ -41,7 +41,7 @@ const int MFCC_CONTEXT = 9;
 const int MFCC_WIN_LEN = 2 * MFCC_CONTEXT + 1;
 const int MFCC_FEATS_PER_TIMESTEP = MFCC_FEATURES * MFCC_WIN_LEN;
 
-const float COEFF = 0.97f;
+const float PREEMPHASIS_COEFF = 0.97f;
 const int N_FFT = 512;
 const int N_FILTERS = 26;
 const int LOWFREQ = 0;
@@ -58,7 +58,8 @@ namespace DeepSpeech {
 class StreamingState {
 public:
   vector<float> accumulated_logits;
-  vector<short> audio_buffer;
+  vector<float> audio_buffer;
+  float last_sample; // used for preemphasis
   vector<float> mfcc_buffer;
   vector<float> batch_buffer;
   bool skip_next_mfcc;
@@ -135,7 +136,7 @@ private:
    */
   void infer(const float* mfcc, int n_frames, vector<float>& output_logits);
 
-  void processAudioWindow(StreamingState* ctx, const vector<short>& buf);
+  void processAudioWindow(StreamingState* ctx, const vector<float>& buf);
   void processMfccWindow(StreamingState* ctx, const vector<float>& buf);
   void pushMfccBuffer(StreamingState* ctx, const float* buf, unsigned int len);
   void addZeroMfccWindow(StreamingState* ctx);
@@ -147,7 +148,6 @@ Private::setupStream(unsigned int prealloc_frames,
                      unsigned int /*sample_rate*/)
 {
   Status status = session->Run({}, {}, {"initialize_state"}, nullptr);
-
   if (!status.ok()) {
     std::cerr << "Error running session: " << status << std::endl;
     return nullptr;
@@ -164,6 +164,7 @@ Private::setupStream(unsigned int prealloc_frames,
   ctx->accumulated_logits.reserve(prealloc_frames * BATCH_SIZE * num_classes);
 
   ctx->audio_buffer.reserve(AUDIO_WIN_LEN_SAMPLES);
+  ctx->last_sample = 0;
   ctx->mfcc_buffer.reserve(MFCC_FEATS_PER_TIMESTEP);
   ctx->mfcc_buffer.resize(MFCC_FEATURES*MFCC_CONTEXT, 0.f);
   ctx->batch_buffer.reserve(N_STEPS_PER_BATCH*MFCC_FEATS_PER_TIMESTEP);
@@ -180,11 +181,14 @@ Private::feedAudioContent(StreamingState* ctx,
 {
   // Consume all the data that was passed in, processing full buffers if needed
   while (buffer_size > 0) {
-    unsigned int next_copy_amount = std::min(buffer_size, (unsigned int)(AUDIO_WIN_LEN_SAMPLES - ctx->audio_buffer.size()));
-    ctx->audio_buffer.insert(ctx->audio_buffer.end(), buffer, buffer + next_copy_amount);
-    buffer += next_copy_amount;
-    buffer_size -= next_copy_amount;
-    assert(ctx->audio_buffer.size() <= AUDIO_WIN_STEP_SAMPLES);
+    while (buffer_size > 0 && ctx->audio_buffer.size() < AUDIO_WIN_LEN_SAMPLES) {
+      // Apply preemphasis to input sample and buffer it
+      float sample = (float)(*buffer) - (PREEMPHASIS_COEFF * ctx->last_sample);
+      ctx->audio_buffer.push_back(sample);
+      ctx->last_sample = *buffer;
+      ++buffer;
+      --buffer_size;
+    }
 
     // If the buffer is full, process and shift it
     if (ctx->audio_buffer.size() == AUDIO_WIN_LEN_SAMPLES) {
@@ -220,7 +224,7 @@ Private::finishStream(StreamingState* ctx)
 }
 
 void
-Private::processAudioWindow(StreamingState* ctx, const vector<short>& buf)
+Private::processAudioWindow(StreamingState* ctx, const vector<float>& buf)
 {
   ctx->skip_next_mfcc = !ctx->skip_next_mfcc;
   if (!ctx->skip_next_mfcc) { // Was true
@@ -231,7 +235,7 @@ Private::processAudioWindow(StreamingState* ctx, const vector<short>& buf)
   float* mfcc;
   int n_frames = csf_mfcc(buf.data(), buf.size(), SAMPLE_RATE,
                           AUDIO_WIN_LEN, AUDIO_WIN_STEP, MFCC_FEATURES, N_FILTERS, N_FFT,
-                          LOWFREQ, SAMPLE_RATE/2, COEFF, CEP_LIFTER, 1, nullptr,
+                          LOWFREQ, SAMPLE_RATE/2, 0.f, CEP_LIFTER, 1, nullptr,
                           &mfcc);
   assert(n_frames == 1);
 
@@ -586,29 +590,15 @@ audioToInputVector(const short* aBuffer, unsigned int aBufferSize,
                    int aSampleRate, int aNCep, int aNContext, float** aMfcc,
                    int* aNFrames, int* aFrameLen)
 {
-  const int window_step = AUDIO_WIN_STEP_SAMPLES * 2; // stride=2
-
-  // Compute MFCC features
-  float* mfcc = (float*)malloc(aNCep * (aBufferSize / window_step) * sizeof(float));
-
-  int n_frames = 0;
-  for (int i = 0; i < aBufferSize; i += window_step, ++n_frames) {
-    if ((i + window_step) > aBufferSize) {
-      break;
-    }
-
-    float* frame_mfcc;
-    int step_frames = csf_mfcc(aBuffer + i, AUDIO_WIN_STEP_SAMPLES, aSampleRate,
-                               AUDIO_WIN_LEN, AUDIO_WIN_STEP, aNCep, N_FILTERS, N_FFT,
-                               LOWFREQ, aSampleRate/2, COEFF, CEP_LIFTER, 1, NULL,
-                               &frame_mfcc);
-    assert(step_frames == 1);
-    memcpy(mfcc + (n_frames * aNCep), frame_mfcc, step_frames * aNCep * sizeof(float));
-    free(frame_mfcc);
-  }
-
   const int contextSize = aNCep * aNContext;
   const int frameSize = aNCep + (2 * aNCep * aNContext);
+
+  // Compute MFCC features
+  float* mfcc;
+  int n_frames = csf_mfcc(aBuffer, aBufferSize, aSampleRate,
+                          AUDIO_WIN_LEN, AUDIO_WIN_STEP, aNCep, N_FILTERS, N_FFT,
+                          LOWFREQ, aSampleRate/2, PREEMPHASIS_COEFF, CEP_LIFTER,
+                          1, NULL, &mfcc);
 
   // Take every other frame (BiRNN stride of 2) and add past/future context
   int ds_input_length = (n_frames + 1) / 2;

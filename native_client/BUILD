@@ -52,7 +52,7 @@ tf_cc_shared_object(
             "alphabet.h",
             "beam_search.h",
             "trie_node.h",
-            "c_speech_features/c_speech_features.c",
+            "c_speech_features/c_speech_features.cpp",
             "kiss_fft130/kiss_fft.c",
             "kiss_fft130/tools/kiss_fftr.c",
             "c_speech_features/c_speech_features.h",
