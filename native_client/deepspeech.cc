@@ -590,29 +590,15 @@ audioToInputVector(const short* aBuffer, unsigned int aBufferSize,
                    int aSampleRate, int aNCep, int aNContext, float** aMfcc,
                    int* aNFrames, int* aFrameLen)
 {
-  const int window_step = AUDIO_WIN_STEP_SAMPLES * 2; // stride=2
-
-  // Compute MFCC features
-  float* mfcc = (float*)malloc(aNCep * (aBufferSize / window_step) * sizeof(float));
-
-  int n_frames = 0;
-  for (int i = 0; i < aBufferSize; i += window_step, ++n_frames) {
-    if ((i + window_step) > aBufferSize) {
-      break;
-    }
-
-    float* frame_mfcc;
-    int step_frames = csf_mfcc(aBuffer + i, AUDIO_WIN_STEP_SAMPLES, aSampleRate,
-                               AUDIO_WIN_LEN, AUDIO_WIN_STEP, aNCep, N_FILTERS, N_FFT,
-                               LOWFREQ, aSampleRate/2, COEFF, CEP_LIFTER, 1, NULL,
-                               &frame_mfcc);
-    assert(step_frames == 1);
-    memcpy(mfcc + (n_frames * aNCep), frame_mfcc, step_frames * aNCep * sizeof(float));
-    free(frame_mfcc);
-  }
-
   const int contextSize = aNCep * aNContext;
   const int frameSize = aNCep + (2 * aNCep * aNContext);
+
+  // Compute MFCC features
+  float* mfcc;
+  int n_frames = csf_mfcc(aBuffer, aBufferSize, aSampleRate,
+                          AUDIO_WIN_LEN, AUDIO_WIN_STEP, aNCep, N_FILTERS, N_FFT,
+                          LOWFREQ, aSampleRate/2, PREEMPHASIS_COEFF, CEP_LIFTER,
+                          1, NULL, &mfcc);
 
   // Take every other frame (BiRNN stride of 2) and add past/future context
   int ds_input_length = (n_frames + 1) / 2;
