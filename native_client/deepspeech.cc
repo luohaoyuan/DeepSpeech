@@ -304,6 +304,8 @@ Private::processBatch(StreamingState* ctx, float* buf, unsigned int n_steps)
 void
 Private::infer(float* aMfcc, int n_frames, std::vector<float>& logits_output)
 {
+  const size_t num_classes = alphabet->GetSize() + 1; // +1 for blank
+
   if (run_aot) {
 #ifdef DS_NATIVE_MODEL
     Eigen::ThreadPool tp(2);  // Size the thread pool as appropriate.
@@ -355,7 +357,7 @@ Private::infer(float* aMfcc, int n_frames, std::vector<float>& logits_output)
 
     auto logits_mapped = outputs[0].flat<float>();
     // The CTCDecoder works with log-probs.
-    for (int t = 0; t < logits_mapped.size(); ++t) {
+    for (int t = 0; t < n_frames * BATCH_SIZE * num_classes; ++t) {
       logits_output.push_back(logits_mapped(t));
     }
   }
