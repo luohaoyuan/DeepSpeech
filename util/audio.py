@@ -23,10 +23,25 @@ except ImportError:
 
     def audioToInputVector(audio, fs, numcep, numcontext):
         # Get mfcc coefficients
-        features = mfcc(audio, samplerate=fs, numcep=numcep)
+        features = np.empty([0, numcep])
 
-        # We only keep every second feature (BiRNN stride = 2)
-        features = features[::2]
+        win_len = 0.025
+        win_step = 0.010
+
+        win_len_samples = int(math.ceil(win_len * fs))
+        win_step_samples = int(math.ceil(win_step * fs)) * 2 # stride = 2
+
+        features = np.empty([0, numcep])
+        for i in range(0, len(audio), win_step_samples):
+            frame = audio[i:i + win_len_samples]
+            if len(frame) < win_step_samples:
+                break
+            framefeats = mfcc(frame,
+                              samplerate=fs,
+                              numcep=numcep,
+                              winlen=win_len,
+                              winstep=win_step)
+            features = np.concatenate((features, framefeats))
 
         # One stride per time step in the input
         num_strides = len(features)
